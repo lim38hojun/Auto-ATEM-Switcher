@@ -1,0 +1,1 @@
+Auto-ATEMswitcher yes

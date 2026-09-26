@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ATEM Mini Pro AI Broadcast Director — Multi-Camera Selection Testbench</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <!-- Top Bar: System Header & Ingestion Mode Tabs -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="tally-dot red"></span>
+      <div>
+        <h1>ATEM Mini Pro <span>AI Broadcast Director</span></h1>
+        <p class="subtitle">Multi-Camera Scene Selection &amp; Automated Switching Testbench</p>
+      </div>
+    </div>
+
+    <nav class="mode-tabs" id="modeTabs">
+      <button class="mode-btn active" data-mode="synthetic">① 가상 4채널 공연 시나리오</button>
+      <button class="mode-btn" data-mode="quad_files">② 4개 개별 영상 동기화</button>
+      <button class="mode-btn" data-mode="multiview_crop">③ ATEM 10분할 멀티뷰 크롭</button>
+      <button class="mode-btn" data-mode="live_webcam">④ 실시간 캡처/웹캠</button>
+    </nav>
+
+    <div class="header-actions">
+      <div class="atem-badge" id="atemBadge">ATEM: MockSwitcher (ME0)</div>
+      <button class="btn secondary" id="btnPause">⏸ 일시정지</button>
+      <button class="btn primary" id="btnRunBenchmark">▶ 30초 과업 벤치마크 평가 실행</button>
+    </div>
+  </header>
+
+  <!-- Scene Event Banner -->
+  <section class="scene-banner">
+    <div class="scene-info">
+      <span class="tag">현재 장면 이벤트</span>
+      <strong id="scenePhaseName">Opening Band Wide / Vocal Intro</strong>
+      <span class="gt-badge" id="sceneGtCams">추천(GT) 카메라: Cam 1, Cam 2</span>
+    </div>
+    <div class="audio-strip">
+      <span class="beat-lamp" id="beatLamp">● BEAT 120 BPM</span>
+      <span class="solo-lamp" id="soloLamp">SOLO STANDBY</span>
+      <span class="timecode" id="timecodeDisplay">00:00.0 / 00:30.0</span>
+    </div>
+  </section>
+
+  <!-- Main ATEM 10-Split Hardware Multiview Grid -->
+  <main class="multiview-container">
+    <!-- Top Row: Preview (Green) & Program (Red) -->
+    <div class="top-monitors">
+      <div class="monitor-box preview-box">
+        <div class="monitor-header green-bar">
+          <span>PREVIEW (대기 화면 — 차순위 추천)</span>
+          <strong id="pvwCamLabel">CAM 2</strong>
+        </div>
+        <div class="video-wrap">
+          <img id="pvwImage" alt="Preview Feed" />
+          <div class="monitor-overlay-bottom">
+            <span id="pvwReasonText">대기 후보 점수 격차: +0.00</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="monitor-box program-box">
+        <div class="monitor-header red-bar">
+          <span>PROGRAM (최종 송출 화면 — ON AIR)</span>
+          <strong id="pgmCamLabel">CAM 1</strong>
+        </div>
+        <div class="video-wrap">
+          <img id="pgmImage" alt="Program Feed" />
+          <div class="monitor-overlay-bottom">
+            <span class="state-pill" id="smStateBadge">HOLD_LOCKED</span>
+            <span id="pgmReasonText">초기 프레임 유지 중</span>
+          </div>
+        </div>
+        <!-- Hold Duration Progress Bar -->
+        <div class="hold-bar-wrap">
+          <div class="hold-bar-labels">
+            <span>샷 유지 시간: <strong id="shotDurText">0.0s</strong></span>
+            <span>최소 유지(<span id="lblMinHold">2.5</span>s) ~ 최대 제한(<span id="lblMaxHold">7.5</span>s)</span>
+          </div>
+          <div class="hold-progress-track">
+            <div class="hold-min-marker" id="holdMinMarker" style="left: 33%;"></div>
+            <div class="hold-progress-fill" id="holdProgressFill" style="width: 10%;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Middle Row: 4 Synchronized Camera Channels (Cam 1 ~ Cam 4) -->
+    <div class="cam-grid">
+      <!-- Camera 1 -->
+      <div class="cam-card" id="camCard1" data-cam="1">
+        <div class="cam-card-header">
+          <span class="cam-title">CAM 1 — Wide Master</span>
+          <span class="cam-score-badge" id="scoreTotal1">0.00</span>
+        </div>
+        <div class="cam-video-wrap">
+          <img id="camImg1" alt="Camera 1" />
+        </div>
+        <div class="metrics-bars">
+          <div class="m-row"><span>구도(Framing)</span><div class="bar"><div id="barF1"></div></div><b id="valF1">0.00</b></div>
+          <div class="m-row"><span>모션(Motion)</span><div class="bar"><div id="barM1"></div></div><b id="valM1">0.00</b></div>
+          <div class="m-row"><span>선명도(Sharp)</span><div class="bar"><div id="barS1"></div></div><b id="valS1">0.00</b></div>
+        </div>
+        <button class="cut-btn" onclick="manualCut(1)">CUT CAM 1</button>
+      </div>
+
+      <!-- Camera 2 -->
+      <div class="cam-card" id="camCard2" data-cam="2">
+        <div class="cam-card-header">
+          <span class="cam-title">CAM 2 — Vocal Close-Up</span>
+          <span class="cam-score-badge" id="scoreTotal2">0.00</span>
+        </div>
+        <div class="cam-video-wrap">
+          <img id="camImg2" alt="Camera 2" />
+        </div>
+        <div class="metrics-bars">
+          <div class="m-row"><span>구도(Framing)</span><div class="bar"><div id="barF2"></div></div><b id="valF2">0.00</b></div>
+          <div class="m-row"><span>모션(Motion)</span><div class="bar"><div id="barM2"></div></div><b id="valM2">0.00</b></div>
+          <div class="m-row"><span>선명도(Sharp)</span><div class="bar"><div id="barS2"></div></div><b id="valS2">0.00</b></div>
+        </div>
+        <button class="cut-btn" onclick="manualCut(2)">CUT CAM 2</button>
+      </div>
+
+      <!-- Camera 3 -->
+      <div class="cam-card" id="camCard3" data-cam="3">
+        <div class="cam-card-header">
+          <span class="cam-title">CAM 3 — Guitar Solo</span>
+          <span class="cam-score-badge" id="scoreTotal3">0.00</span>
+        </div>
+        <div class="cam-video-wrap">
+          <img id="camImg3" alt="Camera 3" />
+        </div>
+        <div class="metrics-bars">
+          <div class="m-row"><span>구도(Framing)</span><div class="bar"><div id="barF3"></div></div><b id="valF3">0.00</b></div>
+          <div class="m-row"><span>모션(Motion)</span><div class="bar"><div id="barM3"></div></div><b id="valM3">0.00</b></div>
+          <div class="m-row"><span>선명도(Sharp)</span><div class="bar"><div id="barS3"></div></div><b id="valS3">0.00</b></div>
+        </div>
+        <button class="cut-btn" onclick="manualCut(3)">CUT CAM 3</button>
+      </div>
+
+      <!-- Camera 4 -->
+      <div class="cam-card" id="camCard4" data-cam="4">
+        <div class="cam-card-header">
+          <span class="cam-title">CAM 4 — Roaming Stage</span>
+          <span class="cam-score-badge" id="scoreTotal4">0.00</span>
+        </div>
+        <div class="cam-video-wrap">
+          <img id="camImg4" alt="Camera 4" />
+        </div>
+        <div class="metrics-bars">
+          <div class="m-row"><span>구도(Framing)</span><div class="bar"><div id="barF4"></div></div><b id="valF4">0.00</b></div>
+          <div class="m-row"><span>모션(Motion)</span><div class="bar"><div id="barM4"></div></div><b id="valM4">0.00</b></div>
+          <div class="m-row"><span>선명도(Sharp)</span><div class="bar"><div id="barS4"></div></div><b id="valS4">0.00</b></div>
+        </div>
+        <button class="cut-btn" onclick="manualCut(4)">CUT CAM 4</button>
+      </div>
+    </div>
+
+    <!-- Bottom Row: Control Panels & Multi-Camera Selection Task Evaluation -->
+    <div class="bottom-deck">
+      <!-- Panel 1: Broadcast Rule Engine & Vision Weight Controls -->
+      <section class="deck-panel">
+        <h3>🎛 방송 연출 룰 엔진 &amp; 스코어링 가중치 설정</h3>
+        <div class="control-grid">
+          <label>
+            <span>AI 자동 디렉터 (Auto Switching)</span>
+            <input type="checkbox" id="chkAutoDirector" checked />
+          </label>
+          <label>
+            <span>오디오 BPM 비트 동기화 컷</span>
+            <input type="checkbox" id="chkBeatSync" checked />
+          </label>
+          <label>
+            <span>최소 샷 유지 (Min Hold): <b id="txtMinHold">2.5s</b></span>
+            <input type="range" id="rngMinHold" min="1.0" max="5.0" step="0.5" value="2.5" />
+          </label>
+          <label>
+            <span>최대 전환 제한 (Max Hold): <b id="txtMaxHold">7.5s</b></span>
+            <input type="range" id="rngMaxHold" min="4.5" max="12.0" step="0.5" value="7.5" />
+          </label>
+          <label>
+            <span>구도 가중치 (w_framing): <b id="txtWFraming">0.45</b></span>
+            <input type="range" id="rngWFraming" min="0.1" max="0.8" step="0.05" value="0.45" />
+          </label>
+          <label>
+            <span>모션 가중치 (w_motion): <b id="txtWMotion">0.35</b></span>
+            <input type="range" id="rngWMotion" min="0.1" max="0.8" step="0.05" value="0.35" />
+          </label>
+          <label>
+            <span>라플라시안 블러 임계값: <b id="txtBlurThresh">45</b></span>
+            <input type="range" id="rngBlurThresh" min="15" max="100" step="5" value="45" />
+          </label>
+        </div>
+
+        <div class="upload-box">
+          <h4>📂 사용자 영상 파일 로드 (선택 사항)</h4>
+          <form id="uploadForm">
+            <div class="upload-row">
+              <span>10분할 멀티뷰 단일 MP4:</span>
+              <input type="file" name="multiview" accept="video/*" />
+            </div>
+            <div class="upload-row">
+              <span>또는 개별 Cam 1~4 MP4:</span>
+              <input type="file" name="cam1" accept="video/*" title="Cam 1" />
+              <input type="file" name="cam2" accept="video/*" title="Cam 2" />
+              <button type="submit" class="btn small">적용</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Panel 2: Multi-Camera Scene Selection Benchmark Report -->
+      <section class="deck-panel benchmark-panel">
+        <div class="panel-header-flex">
+          <h3>📊 동일 장면 다중 카메라 선택 과업(Task) 평가 리포트</h3>
+          <span class="sub-hint">30초 공연 시나리오(600 프레임) 기준 Ground Truth 비교</span>
+        </div>
+
+        <div class="kpi-cards">
+          <div class="kpi-card">
+            <span class="kpi-label">추천 연출 일치율 (GT Accuracy)</span>
+            <strong class="kpi-val" id="kpiAccuracy">-- %</strong>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">블러/흔들림 회피율 (Blur Avoidance)</span>
+            <strong class="kpi-val green" id="kpiBlurAvoid">-- %</strong>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">평균 샷 유지 시간 (Shot Stability)</span>
+            <strong class="kpi-val" id="kpiMeanHold">-- s</strong>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">깜빡임 위반 (Flicker &lt; MinHold)</span>
+            <strong class="kpi-val" id="kpiFlicker">0 회</strong>
+          </div>
+        </div>
+
+        <!-- Timeline Comparison Strip -->
+        <div class="timeline-comparison">
+          <div class="tl-row">
+            <span class="tl-label">추천 정답 (Ground Truth)</span>
+            <div class="tl-strip" id="stripGT"></div>
+          </div>
+          <div class="tl-row">
+            <span class="tl-label">AI 디렉터 선택 (Program)</span>
+            <div class="tl-strip" id="stripAI"></div>
+          </div>
+          <div class="tl-legend">
+            <span><i class="c-box c1"></i> Cam 1 (Wide)</span>
+            <span><i class="c-box c2"></i> Cam 2 (Vocal)</span>
+            <span><i class="c-box c3"></i> Cam 3 (Guitar Solo)</span>
+            <span><i class="c-box c4"></i> Cam 4 (Roaming)</span>
+            <span><i class="c-box c-blur"></i> Cam 4 블러 위험 구간 (14~17s, 22~24.6s)</span>
+          </div>
+        </div>
+
+        <!-- Live Switching Event Log -->
+        <div class="switch-log-box" id="switchLogBox">
+          <div class="log-item">시스템 준비 완료 — 우측 상단 [30초 과업 벤치마크 평가 실행]을 클릭하거나 실시간 스위칭을 관찰하세요.</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

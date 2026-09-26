@@ -1,0 +1,12 @@
+{
+  "duration_sec": 60,
+  "fps": 20,
+  "total_frames": 1200,
+  "files": {
+    "1": "C:\\Users\\ddosu\\antigravity_workspace\\first\\data\\real_concert\\cam1_real_wide.mp4",
+    "2": "C:\\Users\\ddosu\\antigravity_workspace\\first\\data\\real_concert\\cam2_real_vocal.mp4",
+    "3": "C:\\Users\\ddosu\\antigravity_workspace\\first\\data\\real_concert\\cam3_real_instrument.mp4",
+    "4": "C:\\Users\\ddosu\\antigravity_workspace\\first\\data\\real_concert\\cam4_real_roaming.mp4"
+  },
+  "description": "실제 공연 1분(60초) 분량 4채널 동기화 카메라 MP4 영상 세트"
+}
