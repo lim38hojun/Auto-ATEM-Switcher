@@ -69,6 +69,13 @@ class VisionScorer:
         self._prev_grays: Dict[int, np.ndarray] = {}
         self._face_detector = None  # cv2.FaceDetectorYN (YUNET), or None to use fallback
 
+        # Round-robin face detection state:
+        # YUNET runs on ONE channel per frame (cycling 1→2→3→4→1→...) instead of all channels
+        # every frame. Each camera gets a face update at ~7.5fps (30fps ÷ 4 channels), which is
+        # more than sufficient for concert framing decisions where a camera change takes ≥2.5s.
+        self._face_rr_counter: int = 0          # increments every score_all_channels() call
+        self._face_cache: Dict[int, list] = {}  # cam_id → cached faces list from last YUNET run
+
         model_path = self.YUNET_MODEL_PATH
         if hasattr(cv2, "FaceDetectorYN") and os.path.exists(model_path):
             try:
@@ -85,6 +92,8 @@ class VisionScorer:
 
     def reset_state(self) -> None:
         self._prev_grays.clear()
+        self._face_cache.clear()
+        self._face_rr_counter = 0
 
     def _check_has_video_signal(self, gray: np.ndarray) -> bool:
         """
@@ -98,23 +107,23 @@ class VisionScorer:
         return True
 
     def _detect_subject_and_framing(
-        self, small_bgr: np.ndarray
+        self, small_bgr: np.ndarray, cached_faces: Optional[list] = None
     ) -> Tuple[float, Tuple[int, int, int, int], bool, bool]:
         """
         Locates the dominant performer/subject region and scores framing quality:
           - High score when subject center is inside Golden Rule zone (x in [0.35, 0.65], y in [0.28, 0.60])
           - Penalty if main subject touches left/right frame boundaries (edge clipping)
+
+        Args:
+            small_bgr:    320x180 BGR frame (pre-resized).
+            cached_faces: Pre-computed YUNET face list [[x,y,w,h], ...] for this channel,
+                          from the round-robin YUNET run in score_all_channels.
+                          Empty list means no faces detected; None falls back to HSV.
         """
         h, w = small_bgr.shape[:2]
-        gray = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2GRAY)
 
-        # --- Primary: YUNET DNN face detector (OpenCV 5 FaceDetectorYN) ---
-        faces = []
-        if self._face_detector is not None:
-            _, detections = self._face_detector.detect(small_bgr)
-            if detections is not None and len(detections) > 0:
-                # YUNET rows: [x, y, w, h, lm0x, lm0y, ..., score]  — take x,y,w,h
-                faces = detections[:, :4].astype(int).tolist()
+        # Use caller-supplied face detections (fresh from YUNET or cached from prior frame)
+        faces = cached_faces if cached_faces is not None else []
 
         if len(faces) > 0:
             # Pick largest face by area
@@ -139,6 +148,7 @@ class VisionScorer:
 
             return float(np.clip(framing, 0.0, 1.0)), (int(x), int(y), int(bw), int(bh)), edge_clipped, True
 
+        # --- Fallback: HSV brightness contour (no face detected) ---
         hsv = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2HSV)
 
         # Mask out dark stage background to isolate illuminated performer(s)
@@ -209,8 +219,15 @@ class VisionScorer:
         frame_bgr: np.ndarray,
         audio_bonus: float = 0.0,
         enabled: bool = True,
+        cached_faces: Optional[list] = None,
     ) -> ChannelMetrics:
-        """Evaluates a single camera frame and returns full `ChannelMetrics`."""
+        """Evaluates a single camera frame and returns full `ChannelMetrics`.
+
+        Args:
+            cached_faces: Pre-computed YUNET face list for this channel from the round-robin
+                          scheduler in score_all_channels. Pass None when calling score_channel
+                          standalone (falls back to HSV contour; no YUNET run).
+        """
         small = cv2.resize(frame_bgr, (320, 180), interpolation=cv2.INTER_AREA)
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
 
@@ -233,7 +250,9 @@ class VisionScorer:
             )
 
         lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        framing_score, small_bbox, edge_clipped, face_detected = self._detect_subject_and_framing(small)
+        framing_score, small_bbox, edge_clipped, face_detected = self._detect_subject_and_framing(
+            small, cached_faces=cached_faces
+        )
         motion_score, bg_shake = self._compute_motion_energy(cam_id, gray, small_bbox)
 
         is_blurry = (lap_var < self.config.blur_threshold) or (
@@ -283,14 +302,43 @@ class VisionScorer:
         audio_bonuses: Optional[Dict[int, float]] = None,
         active_channels: Optional[Iterable[int]] = None,
     ) -> Dict[int, ChannelMetrics]:
+        """Score all active channels with round-robin YUNET face detection.
+
+        YUNET runs on exactly ONE channel per call (cycling through all channels in sorted order).
+        The result is cached in ``self._face_cache`` and reused for the remaining channels.
+        Each camera receives a fresh face detection every N calls (where N = number of active
+        channels), giving ~7.5 fps face updates at 30 fps for 4 channels — sufficient for
+        concert framing decisions where shot holds are >= 2.5 s.
+
+        Cost comparison:
+          - Before: YUNET x4 channels per frame = ~54 ms  (30 fps missed)
+          - After:  YUNET x1 channel per frame  = ~17 ms  (30 fps comfortable)
+        """
         bonuses = audio_bonuses or {}
         active_set: Optional[Set[int]] = set(active_channels) if active_channels is not None else None
+
+        sorted_cids = sorted(channels.keys())
+
+        # --- Round-robin YUNET: run on ONE channel this frame, use cache for the rest ---
+        if self._face_detector is not None and sorted_cids:
+            rr_cid = sorted_cids[self._face_rr_counter % len(sorted_cids)]
+            frame_small = cv2.resize(channels[rr_cid], (self._FACE_DET_W, self._FACE_DET_H),
+                                     interpolation=cv2.INTER_AREA)
+            _, detections = self._face_detector.detect(frame_small)
+            if detections is not None and len(detections) > 0:
+                self._face_cache[rr_cid] = detections[:, :4].astype(int).tolist()
+            else:
+                self._face_cache[rr_cid] = []
+            self._face_rr_counter += 1
+
         return {
             cid: self.score_channel(
                 cid,
                 frame,
                 audio_bonus=bonuses.get(cid, 0.0),
                 enabled=(True if active_set is None else (cid in active_set)),
+                # Pass cached faces (may be from this frame or a prior round-robin frame)
+                cached_faces=self._face_cache.get(cid, None),
             )
             for cid, frame in sorted(channels.items())
         }
